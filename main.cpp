@@ -18,6 +18,11 @@ int main() {
   std::cout << "\nGRAFO G3\n";
   g3.printVertices();
 
+  cout << "\n(2)\n";
+  // 2) Faça a busca em largura em G1 partindo do vértice b. 
+  // Exiba na tela a ordem de visitação dos vértices. 
+  g1.breadthFirstSearch("b");
+
   std::cout << "\n(4)\n";
   // 4) Execute o algoritmo do caminho mínimo em G3 e determine o custo
   // do menor caminho entre os vértices x e t. Exiba na tela a lista de

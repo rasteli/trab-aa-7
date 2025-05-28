@@ -3,8 +3,11 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
+#include <queue>
 #include "helpers.cpp"
 
+using namespace std;
 using cost = std::pair<const std::string, int>;
 using cost_map = std::unordered_map<std::string, int>;
 using pred_map = std::unordered_map<std::string, std::string>;
@@ -27,11 +30,14 @@ class Graph {
     Vertex* findByValue(std::string value);
     void shortestPath(cost_map &dist, pred_map &pred, std::vector<std::string> &S);
     void printShortestPath(std::string u, std::string v, pred_map &pred);
+    vector<Vertex*> getVertexsByNextVertex(Vertex* destination);
+    vector<Vertex*> getNextVertexAsVector(Vertex* origin);
   public:
     Graph(std::string path);
     ~Graph();
     void printVertices();
     void shortestPaths(std::string v0_value, std::string dest_value = "");
+    void breadthFirstSearch (string origin);
 };
 
 Graph::Graph(std::string path) {
@@ -210,4 +216,77 @@ void Graph::printShortestPath(std::string u, std::string v, pred_map &pred) {
 
   printShortestPath(u, pred[v], pred);
   std::cout << "(" << pred[v] << ", " << v << ") ";
+}
+
+vector<Vertex*> Graph::getVertexsByNextVertex(Vertex* destination) {
+    vector<Vertex*> result;
+
+    for (Vertex& vertex : vertices) {
+        Vertex* current = vertex.nextVertex;
+        while (current) {
+            if (current->value == destination->value) {
+                result.push_back(&vertex);
+                break;
+            }
+            current = current->nextVertex;
+        }
+    }
+
+    return result;
+}
+
+vector<Vertex*> Graph::getNextVertexAsVector(Vertex* origin) {
+    vector<Vertex*> result;
+
+    Vertex* current = origin->nextVertex;
+    while (current) {
+      result.push_back(findByValue(current->value)); //Usa findByValue para recuperar os ponteiros
+      current = current->nextVertex;
+    }
+
+    return result;
+}
+
+void Graph::breadthFirstSearch(string origin_value) {
+  Vertex *origin;
+  
+  origin = findByValue(origin_value);
+  if (!origin) {
+    cout << "Vértice de origem não encontrado.\n";
+    return;
+  }
+
+  queue<Vertex*> vertex_queue;
+  unordered_set<string> visited_vertex;
+
+  cout << "Busca em largura partindo do vertice " << origin_value << endl;
+  cout << "Ordem de visitacao: ";
+
+  vertex_queue.push(origin);
+  visited_vertex.insert(origin->value);
+
+  while(!vertex_queue.empty()) {
+    Vertex* current = vertex_queue.front();
+    vertex_queue.pop();
+    
+    cout << current->value << " ";
+
+    vector<Vertex*> linkedVertex = getNextVertexAsVector(current);
+    vector<Vertex*> originVertex = getVertexsByNextVertex(current);
+    linkedVertex.insert(linkedVertex.end(), originVertex.begin(), originVertex.end());
+    
+    sort(linkedVertex.begin(), linkedVertex.end(),
+                  [](Vertex* a, Vertex* b) {
+                      return a->value < b->value;
+    });
+    
+    for (Vertex* vertex : linkedVertex) {
+      if (visited_vertex.find(vertex->value) == visited_vertex.end()) {
+          vertex_queue.push(vertex);
+          visited_vertex.insert(vertex->value);
+      }
+    }
+  }
+
+  cout << endl;
 }

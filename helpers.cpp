@@ -1,7 +1,7 @@
 #include <vector>
 #include <iostream>
 
-std::vector<std::string> split(std::string &s, std::string &delimiter) {
+std::vector<std::string> split(std::string s, std::string delimiter) {
   std::vector<std::string> tokens;
   size_t pos = 0;
   std::string token;

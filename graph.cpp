@@ -5,39 +5,39 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
+#include <stack>
 #include "helpers.cpp"
-
-using namespace std;
-using cost = std::pair<const std::string, int>;
-using cost_map = std::unordered_map<std::string, int>;
-using pred_map = std::unordered_map<std::string, std::string>;
 
 struct Vertex {
   std::string value;
-  Vertex *nextVertex;
-  int weight;
-
-  bool operator==(const Vertex &other) const {
-    return value == other.value;
-  }
+  // Lista de adjacência: (destino, peso)
+  std::vector<std::pair<Vertex*, int>> neighbors;
 };
+
+using nbr = std::pair<Vertex*, int>;
+using pred_map = std::unordered_map<std::string, std::string>;
 
 class Graph {
   private:
-    std::vector<Vertex> vertices;
-    void insertVertex(Vertex v);
-    void insertEdge(Vertex from, Vertex to);
+    std::vector<Vertex*> vertices;
     Vertex* findByValue(std::string value);
-    void shortestPath(cost_map &dist, pred_map &pred, std::vector<std::string> &S);
+    void insertEdge(std::string from, std::string to, int weight);
     void printShortestPath(std::string u, std::string v, pred_map &pred);
-    vector<Vertex*> getVertexsByNextVertex(Vertex* destination);
-    vector<Vertex*> getNextVertexAsVector(Vertex* origin);
+    // Retorna todos os vértices que possuem uma aresta apontando para destination.
+    std::vector<nbr> getVertexesToDestination(std::string destination);
   public:
     Graph(std::string path);
     ~Graph();
     void printVertices();
-    void shortestPaths(std::string v0_value, std::string dest_value = "");
-    void breadthFirstSearch (string origin);
+    // Executa o algoritmo de Dijkstra para encontrar caminhos mínimos a partir de start.
+    // Se dest_value for passado, exibe o custo e o conjunto de arestas até o vértice de valor equivalente.
+    void shortestPaths(std::string start, std::string dest_value = "");
+    // Busca em largura (BFS), a partir de start, vértices tanto "para frente" (lista de adjacência)
+    // quanto "para trás" (predecessores) em ordem alfabética.
+    void breadthFirstSearch (std::string start);
+    // Busca em profundidade (DFS), a partir de start, vértices vizinhos (lista de adjacência)
+    // em ordem alfabética.
+    void depthFirstSearch(std::string start);
 };
 
 Graph::Graph(std::string path) {
@@ -56,12 +56,8 @@ Graph::Graph(std::string path) {
       if (splitted_string.size() == 3 && !splitted_string[2].empty())
         weigth = std::stoi(splitted_string[2]);
 
-      Vertex from {splitted_string[0], nullptr, 0};
-      Vertex to {splitted_string[1], nullptr, weigth};
-      
-      insertVertex(from);
-      insertVertex(to);
-      insertEdge(from, to);
+      if (splitted_string.size() >= 2)
+        insertEdge(splitted_string[0], splitted_string[1], weigth);
     }
 
     file.close();
@@ -69,142 +65,171 @@ Graph::Graph(std::string path) {
 }
 
 Graph::~Graph() {
-  for (Vertex &v : vertices) {
-    Vertex *current = v.nextVertex;
-    
-    while (current) {
-      Vertex *copy = current;
-      current = current->nextVertex;
-      delete copy;
-    }
-  }
+  for (Vertex *v: vertices)
+    delete v;
+
+  vertices.clear();
 }
 
-void Graph::insertVertex(Vertex v) {
-  std::vector<Vertex>::iterator it = std::find(vertices.begin(), vertices.end(), v);
-
-  if (it == vertices.end())
-    vertices.push_back(v);
-}
-
-void Graph::insertEdge(Vertex from, Vertex to) {
-  // Encontra ou cria o nó de cabeçalho (from)
-  std::vector<Vertex>::iterator it = std::find(vertices.begin(), vertices.end(), from);
-
-  if (it == vertices.end()) {
-    vertices.push_back(from);
-    it = std::prev(vertices.end());
-  }
-
-  Vertex *current = &(*it);
-
-  // Caminha até o fim da lista
-  while (current->nextVertex != nullptr) {
-    if (current->nextVertex->value == to.value) return; // Evita duplicatas
-    current = current->nextVertex;
-  }
-
-  // Adiciona o nó de destino (to)
-  current->nextVertex = new Vertex(to);
-}
-
-void Graph::shortestPaths(std::string v0_value, std::string dest_value) {
-  cost_map dist;
+void Graph::shortestPaths(std::string start, std::string dest_value) {
   pred_map pred;
+  std::unordered_map<std::string, int> dist;
   
-  Vertex *v0, *current;
-  std::vector<std::string> S;
-  
-  v0 = current = findByValue(v0_value);
+  Vertex *v0 = findByValue(start);
 
   if (!v0) {
-    std::cout << "Valor " << v0_value << " não encontrado.\n";
+    std::cout << "Valor " << start << " não encontrado.\n";
     return;
   }
 
-  for (Vertex v : vertices)
-    dist[v.value] = INT_MAX;
+  // Inicializa as distâncias com um valor muito alto.
+  for (Vertex* v : vertices)
+    dist[v->value] = INT_MAX;
 
-  dist[v0_value] = 0;
+  // Distância entre o mesmo ponto é 0.
+  dist[start] = 0;
 
-  while (current->nextVertex) {
-    pred[current->nextVertex->value] = v0_value;
-    dist[current->nextVertex->value] = current->nextVertex->weight;
-    current = current->nextVertex;
+  // A partir de start: Pair (distância, valor do vértice destino)
+  using Pair = std::pair<int, std::string>; 
+  // Fila de prioridade com std::greater<Pair> vai ordenar as distâncias em ordem crescente.
+  // De modo que pq.top() retorna o vértice com a menor distância a partir de start,
+  // pois std::greater diz à fila colocar em pq.top() o elemento x tal que x < y para todo y.
+  std::priority_queue<Pair, std::vector<Pair>, std::greater<Pair>> pq;
+  pq.emplace(0, start);
+
+  while (!pq.empty()) {
+    auto [dist_u, u_value] = pq.top();
+    pq.pop();
+
+    if (dist_u > dist[u_value]) continue;
+
+    Vertex *current = findByValue(u_value);
+
+    for (nbr neighbor : current->neighbors) {
+      std::string w_value = neighbor.first->value;
+      int new_dist = dist_u + neighbor.second;
+
+      // DIST[w] = min{DIST[w], DIST[u] + COST[u, v]}
+      if (new_dist < dist[w_value]) {
+        dist[w_value] = new_dist;
+        pq.emplace(new_dist, w_value);
+        // Armazena o predecessor do vértice atual.
+        // Útil para imprimir o caminho de arestas.
+        pred[w_value] = u_value;
+      }
+    }
   }
-
-  S.push_back(v0->value);
-
-  shortestPath(dist, pred, S);
 
   if (!dest_value.empty() && dist[dest_value] != INT_MAX) {
-    std::cout << "O menor caminho entre " << v0_value
-              << " e " << dest_value << "é " << dist[dest_value] << std::endl;
+    std::cout << "O menor caminho entre " << start
+              << " e " << dest_value << ": " << dist[dest_value] << std::endl;
 
-    std::cout << "O conjunto de arestas desse caminho é ";
-    printShortestPath(v0_value, dest_value, pred);
+    std::cout << "O conjunto de arestas desse caminho: ";
+    printShortestPath(start, dest_value, pred);
   }
 }
 
-void Graph::shortestPath(cost_map &dist, pred_map &pred, std::vector<std::string> &S) {
-  std::string uMin;
-  int distMin = INT_MAX;
+void Graph::breadthFirstSearch(std::string start) {
+  Vertex *origin = findByValue(start);
 
-  for (cost &pair : dist) {
-    std::string w = pair.first;
-    int dist = pair.second;
+  if (!origin) {
+    std::cout << "Vértice de origem não encontrado.\n";
+    return;
+  }
 
-    std::vector<std::string>::iterator it = std::find(S.begin(), S.end(), w);
+  std::queue<Vertex*> vertex_queue;
+  std::unordered_set<std::string> visited_vertexes;
 
-    // Define u tal que dist[u] = {min(dist[w])} para todo w ∉ S
-    if (it == S.end() && dist < distMin) {
-      uMin = w;
-      distMin = dist;
+  std::cout << "Busca em largura partindo do vertice " << start << std::endl;
+  std::cout << "Ordem de visitacao: ";
+
+  vertex_queue.push(origin);
+  visited_vertexes.insert(origin->value);
+
+  while(!vertex_queue.empty()) {
+    Vertex* current = vertex_queue.front();
+    vertex_queue.pop();
+    
+    // Imprime o valor do vértice.
+    std::cout << current->value << " ";
+
+    std::vector<nbr> neighbors = current->neighbors;
+    // Lista de vértices que têm caminho para current.
+    std::vector<nbr> predecessors = getVertexesToDestination(current->value);
+
+    neighbors.insert(neighbors.end(), predecessors.begin(), predecessors.end());
+
+    std::sort(neighbors.begin(), neighbors.end(),
+      [](nbr a, nbr b) {
+        return a.first->value < b.first->value;
+      }
+    );
+    
+    for (nbr vertex : neighbors) {
+      if (!visited_vertexes.count(vertex.first->value)) {
+          vertex_queue.push(vertex.first);
+          visited_vertexes.insert(vertex.first->value);
+      }
     }
   }
 
-  // Todos os vértices de G estão em S
-  if (uMin.empty()) return;
-  
-  Vertex *u, *current;
-  u = current = findByValue(uMin);
+  std::cout << std::endl;
+}
 
-  S.push_back(current->value);
-  
-  while (current->nextVertex) {
-    int dist_u = dist[u->value];
-    int dist_w = dist[current->nextVertex->value];
+void Graph::depthFirstSearch(std::string start) {
+  std::stack<Vertex*> stack;
+  std::unordered_set<std::string> visited;
 
-    if (dist_u + current->nextVertex->weight < dist_w) {
-      pred[current->nextVertex->value] = u->value;
-      dist[current->nextVertex->value] = dist_u + current->nextVertex->weight;
-    }
+  Vertex *origin = findByValue(start);
 
-    current = current->nextVertex;
+  if (!origin) {
+    std::cout << "Vértice de origem não encontrado.\n";
+    return;
   }
 
-  shortestPath(dist, pred, S);
+  std::cout << "Busca em profundidade partindo do vertice " << start << std::endl;
+  std::cout << "Ordem de visitacao: ";
+
+  stack.push(origin);
+
+  while (!stack.empty()) {
+    Vertex* current = stack.top();
+    stack.pop();
+
+    if (visited.count(current->value)) continue;
+
+    visited.insert(current->value);
+    // Imprime o valor do vértice.
+    std::cout << current->value << " ";
+
+    std::vector<nbr> neighbors = current->neighbors;
+
+    // Ordena de forma decrescente para adicionar na pilha (FILO)
+    std::sort(neighbors.begin(), neighbors.end(),
+      [](nbr a, nbr b) {
+        return a.first->value > b.first->value;
+      }
+    );
+
+    // Empilha na ordem inversa para que o menor seja visitado primeiro
+    for (nbr vertex : neighbors) {
+      if (!visited.count(vertex.first->value)) {
+        stack.push(vertex.first);
+      }
+    }
+  }
+  
+  std::cout << std::endl;
 }
 
-Vertex *Graph::findByValue(std::string value) {
-  Vertex match{value};
-  std::vector<Vertex>::iterator it = std::find(vertices.begin(), vertices.end(), match);
-
-  if (it == vertices.end())
-    return nullptr;
-
-  return &(*it);
-}
+// --- Métodos utilitários ---
 
 void Graph::printVertices() {
-  for (Vertex v : vertices) {
-    std::cout << "Vertex: " << v.value;
+  for (Vertex *v : vertices) {
+    std::cout << "Vertex: " << v->value;
 
-    Vertex *neighbor = v.nextVertex;
-
-    while (neighbor) {
-      std::cout << " -> " << neighbor->value << '(' << neighbor->weight << ')';
-      neighbor = neighbor->nextVertex;
+    for (nbr neighbor : v->neighbors) {
+      std::cout << " -> " << neighbor.first->value << '(' << neighbor.second << ')';
     }
 
     std::cout << '\n';
@@ -218,75 +243,59 @@ void Graph::printShortestPath(std::string u, std::string v, pred_map &pred) {
   std::cout << "(" << pred[v] << ", " << v << ") ";
 }
 
-vector<Vertex*> Graph::getVertexsByNextVertex(Vertex* destination) {
-    vector<Vertex*> result;
+void Graph::insertEdge(std::string fromValue, std::string toValue, int weight) {
+  // Encontra ou cria o nó de cabeçalho (from)
+  Vertex* from = findByValue(fromValue);
 
-    for (Vertex& vertex : vertices) {
-        Vertex* current = vertex.nextVertex;
-        while (current) {
-            if (current->value == destination->value) {
-                result.push_back(&vertex);
-                break;
-            }
-            current = current->nextVertex;
-        }
-    }
-
-    return result;
-}
-
-vector<Vertex*> Graph::getNextVertexAsVector(Vertex* origin) {
-    vector<Vertex*> result;
-
-    Vertex* current = origin->nextVertex;
-    while (current) {
-      result.push_back(findByValue(current->value)); //Usa findByValue para recuperar os ponteiros
-      current = current->nextVertex;
-    }
-
-    return result;
-}
-
-void Graph::breadthFirstSearch(string origin_value) {
-  Vertex *origin;
-  
-  origin = findByValue(origin_value);
-  if (!origin) {
-    cout << "Vértice de origem não encontrado.\n";
-    return;
+  if (!from) {
+    from = new Vertex{fromValue};
+    vertices.push_back(from);
   }
 
-  queue<Vertex*> vertex_queue;
-  unordered_set<string> visited_vertex;
+  // Encontra ou cria o nó adjacente (to)
+  Vertex* to = findByValue(toValue);
 
-  cout << "Busca em largura partindo do vertice " << origin_value << endl;
-  cout << "Ordem de visitacao: ";
+  if (!to) {
+    to = new Vertex{toValue};
+    vertices.push_back(to);
+  }
 
-  vertex_queue.push(origin);
-  visited_vertex.insert(origin->value);
+  // Verifica se a aresta já existe (evita duplicata)
+  for (nbr neighbor : from->neighbors)
+    if (neighbor.first == to) return;
 
-  while(!vertex_queue.empty()) {
-    Vertex* current = vertex_queue.front();
-    vertex_queue.pop();
-    
-    cout << current->value << " ";
+  // Adiciona o par (nó de destino, peso a partir de from)
+  from->neighbors.emplace_back(to, weight);
+}
 
-    vector<Vertex*> linkedVertex = getNextVertexAsVector(current);
-    vector<Vertex*> originVertex = getVertexsByNextVertex(current);
-    linkedVertex.insert(linkedVertex.end(), originVertex.begin(), originVertex.end());
-    
-    sort(linkedVertex.begin(), linkedVertex.end(),
-                  [](Vertex* a, Vertex* b) {
-                      return a->value < b->value;
-    });
-    
-    for (Vertex* vertex : linkedVertex) {
-      if (visited_vertex.find(vertex->value) == visited_vertex.end()) {
-          vertex_queue.push(vertex);
-          visited_vertex.insert(vertex->value);
+Vertex* Graph::findByValue(std::string value) {
+  std::vector<Vertex*>::iterator it = std::find_if(vertices.begin(), vertices.end(), 
+    [&value](Vertex *v) {
+      return v->value == value;
+    }
+  );
+
+  if (it == vertices.end())
+    return nullptr;
+
+  return *it;
+}
+
+std::vector<nbr> Graph::getVertexesToDestination(std::string destination) {
+  std::vector<nbr> result;
+
+  for (Vertex *v : vertices) {
+    for (nbr neighbor : v->neighbors) {
+      if (neighbor.first->value == destination) {
+        // Adicionando um par com peso 0, pois é mais barato que
+        // transformar o vetor para retornar apenas a primeira componente
+        // no BFS.
+        result.emplace_back(v, 0);
+        // Não é necessário checar os demais vizinhos de v.
+        break;
       }
     }
   }
 
-  cout << endl;
+  return result;
 }
